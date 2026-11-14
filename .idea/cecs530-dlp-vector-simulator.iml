@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module type="PYTHON_MODULE" version="4">
+  <component name="NewModuleRootManager">
+    <content url="file://$MODULE_DIR$">
+      <excludeFolder url="file://$MODULE_DIR$/venv" />
+    </content>
+    <orderEntry type="jdk" jdkName="~\OneDrive\Desktop\Masters\CSULB\Second Year\Semester 1\CECS_530_Computer_Architecture\assignments\Assignment 4\cecs530-dlp-vector-simulator\venv" jdkType="Python SDK" />
+    <orderEntry type="sourceFolder" forTests="false" />
+  </component>
+  <component name="PackageRequirementsSettings" />
+  <component name="PyDocumentationSettings" />
+  <component name="ReSTService" />
+  <component name="TestRunnerService" />
+</module>
