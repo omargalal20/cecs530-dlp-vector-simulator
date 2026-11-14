@@ -10,7 +10,7 @@ A small Python simulator for data-level parallelism. It runs vector operations w
 
 | Question | Task | Result |
 |---|---|---|
-| 1 | Vector add, multiply, scalar multiply, strip mining | TBD |
+| 1 | Vector add, multiply, scalar multiply, strip mining, instruction counts | All results match scalar code. n=150 splits into 64 + 64 + 22. Vector add at n=64: 13 instructions vs 513 scalar |
 | 2 | Memory bank simulation, strides 1 to 16 | TBD |
 | 3 | DAXPY cycles, vector vs scalar | TBD |
 | 4 | Performance analysis | See report |
