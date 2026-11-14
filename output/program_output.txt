@@ -202,3 +202,32 @@ Q2b: total memory access cycles, including memory latency
       16           1         63          315           391         6.11         5.1x
 
 Rule check: conflicts happen when the banks used < busy time (6): matches simulation
+
+============================================================
+Question 3: DAXPY, Y[i] = a * X[i] + Y[i]
+============================================================
+
+Q3a: correctness (vector result vs scalar loop)
+  Lecture example (a = 2)    n =   3: correct
+  Random inputs (a = 3)      n =  64: correct
+  Random inputs (a = 3)      n = 128: correct
+  Random inputs (a = 3)      n = 256: correct
+  Lecture example result: [12, 24, 36]
+
+Q3b: 64 elements, one strip, no chaining
+  instruction  startup   VL  cycles   start    end
+  vld X            12   64      76       0     76
+  vmul.vs           7   64      71      76    147
+  vld Y            12   64      76     147    223
+  vadd.vv           6   64      70     223    293
+  vst Y            12   64      76     293    369
+  Total = 49 startup + 5 x 64 = 369 cycles
+  Scalar = 2 setup + 8 x 64 = 514 cycles (1 instruction per cycle)
+  Speedup = 514 / 369 = 1.39x
+
+Q3c: longer vectors with strip mining (MVL = 64)
+     n  strips  vector  per element  scalar  speedup  chained (3n)
+    64       1     369         5.77     514    1.39x           192
+   128       2     738         5.77    1026    1.39x           384
+   256       4    1476         5.77    2050    1.39x           768
+  chained (3n) = lecture's chime model: 3 convoys x n, startup ignored
