@@ -7,6 +7,7 @@ Standard library only. Questions are added one at a time:
 """
 
 import random
+from math import gcd
 
 # Machine parameters (from the assignment and lecture)
 MVL = 64
@@ -286,6 +287,103 @@ def print_question_1c(rows):
               f"{r['vector']:>8}{r['ratio']:>14.1f}x")
 
 
+# ---------------------------------------------------------------------------
+# Question 2: memory bank simulation
+# ---------------------------------------------------------------------------
+# Rules (from the assignment):
+#   - Requests are issued in order, at most one per cycle.
+#   - Request i reads address i * stride, which is in bank (address % banks).
+#   - A bank is busy for BANK_BUSY cycles after it accepts a request.
+#   - If the bank is busy, the request waits (and so do the ones behind it).
+# Cycles are counted from 0. Total time = latency + last issue cycle + 1,
+# which gives latency + length when there are no conflicts (lecture: 12 + 64 = 76).
+
+VECTOR_LENGTH = 64
+
+
+def simulate_banks(stride, length=VECTOR_LENGTH, num_banks=NUM_BANKS, busy=BANK_BUSY):
+    """Issue the requests in order and return one record per request."""
+    free_at = [0] * num_banks      # first cycle each bank can accept a request
+    requests = []
+    previous_issue = -1
+    for i in range(length):
+        address = i * stride
+        bank = address % num_banks
+        earliest = previous_issue + 1
+        issue = max(earliest, free_at[bank])
+        free_at[bank] = issue + busy
+        requests.append({"index": i, "address": address, "bank": bank,
+                         "issue": issue, "stall": issue - earliest})
+        previous_issue = issue
+    return requests
+
+
+def total_cycles(requests, latency=MEMORY_LATENCY):
+    """Latency plus the cycle in which the last request is issued (counted from 1)."""
+    return latency + requests[-1]["issue"] + 1
+
+
+def banks_visited(stride, num_banks=NUM_BANKS):
+    """How many different banks the stride rotates through."""
+    return num_banks // gcd(stride, num_banks)
+
+
+def conflict_expected(stride, num_banks=NUM_BANKS, busy=BANK_BUSY):
+    """A bank is reused after `banks_visited` requests; a conflict needs that to be < busy."""
+    return banks_visited(stride, num_banks) < busy
+
+
+def question_2():
+    """Simulate every stride and collect the numbers for the table and graph."""
+    rows = []
+    for stride in STRIDES:
+        requests = simulate_banks(stride)
+        cycles = total_cycles(requests)
+        rows.append({
+            "stride": stride,
+            "requests": requests,
+            "conflicts": sum(1 for r in requests if r["stall"] > 0),
+            "stall_cycles": sum(r["stall"] for r in requests),
+            "cycles": cycles,
+            "per_element": cycles / len(requests),
+            "banks_visited": banks_visited(stride),
+            "conflict_expected": conflict_expected(stride),
+        })
+    base = rows[0]["cycles"]
+    for r in rows:
+        r["slowdown"] = r["cycles"] / base
+    return rows
+
+
+def print_question_2(rows, trace_length=10):
+    print("=" * 60)
+    print("Question 2: memory bank simulation")
+    print("=" * 60)
+    print(f"Banks = {NUM_BANKS}, bank busy = {BANK_BUSY} cycles, "
+          f"latency = {MEMORY_LATENCY} cycles, vector length = {VECTOR_LENGTH}")
+
+    print(f"\nQ2a: first {trace_length} requests for each stride (cycles start at 1)")
+    for r in rows:
+        print(f"\n  stride {r['stride']}")
+        print(f"    {'req':>3}{'address':>9}{'bank':>6}{'issue cycle':>13}{'wait':>6}  conflict")
+        for q in r["requests"][:trace_length]:
+            flag = "yes" if q["stall"] > 0 else "no"
+            print(f"    {q['index']:>3}{q['address']:>9}{q['bank']:>6}"
+                  f"{q['issue'] + 1:>13}{q['stall']:>6}  {flag}")
+
+    print("\nQ2b: total memory access cycles, including memory latency")
+    print(f"  {'stride':>6}{'banks used':>12}{'conflicts':>11}{'wait cycles':>13}"
+          f"{'total cycles':>14}{'per element':>13}{'vs stride 1':>13}")
+    for r in rows:
+        print(f"  {r['stride']:>6}{r['banks_visited']:>12}{r['conflicts']:>11}"
+              f"{r['stall_cycles']:>13}{r['cycles']:>14}{r['per_element']:>13.2f}"
+              f"{r['slowdown']:>12.1f}x")
+
+    matches = all((r["conflicts"] > 0) == r["conflict_expected"] for r in rows)
+    print("\nRule check: conflicts happen when the banks used < busy time "
+          f"({BANK_BUSY}): {'matches simulation' if matches else 'MISMATCH'}")
+
+
 def main():
     results, too_long = question_1a()
     print_question_1a(results, too_long)
@@ -293,6 +391,8 @@ def main():
     print_question_1b(question_1b())
     print()
     print_question_1c(question_1c())
+    print()
+    print_question_2(question_2())
 
 
 if __name__ == "__main__":

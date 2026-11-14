@@ -120,3 +120,85 @@ Instructions counted (taken from the lecture's DAXPY code):
   scalar_mul   150       3      902      30          30.1x
   scalar_mul   256       4     1538      39          39.4x
   scalar_mul   512       8     3074      75          41.0x
+
+============================================================
+Question 2: memory bank simulation
+============================================================
+Banks = 8, bank busy = 6 cycles, latency = 12 cycles, vector length = 64
+
+Q2a: first 10 requests for each stride (cycles start at 1)
+
+  stride 1
+    req  address  bank  issue cycle  wait  conflict
+      0        0     0            1     0  no
+      1        1     1            2     0  no
+      2        2     2            3     0  no
+      3        3     3            4     0  no
+      4        4     4            5     0  no
+      5        5     5            6     0  no
+      6        6     6            7     0  no
+      7        7     7            8     0  no
+      8        8     0            9     0  no
+      9        9     1           10     0  no
+
+  stride 2
+    req  address  bank  issue cycle  wait  conflict
+      0        0     0            1     0  no
+      1        2     2            2     0  no
+      2        4     4            3     0  no
+      3        6     6            4     0  no
+      4        8     0            7     2  yes
+      5       10     2            8     0  no
+      6       12     4            9     0  no
+      7       14     6           10     0  no
+      8       16     0           13     2  yes
+      9       18     2           14     0  no
+
+  stride 4
+    req  address  bank  issue cycle  wait  conflict
+      0        0     0            1     0  no
+      1        4     4            2     0  no
+      2        8     0            7     4  yes
+      3       12     4            8     0  no
+      4       16     0           13     4  yes
+      5       20     4           14     0  no
+      6       24     0           19     4  yes
+      7       28     4           20     0  no
+      8       32     0           25     4  yes
+      9       36     4           26     0  no
+
+  stride 8
+    req  address  bank  issue cycle  wait  conflict
+      0        0     0            1     0  no
+      1        8     0            7     5  yes
+      2       16     0           13     5  yes
+      3       24     0           19     5  yes
+      4       32     0           25     5  yes
+      5       40     0           31     5  yes
+      6       48     0           37     5  yes
+      7       56     0           43     5  yes
+      8       64     0           49     5  yes
+      9       72     0           55     5  yes
+
+  stride 16
+    req  address  bank  issue cycle  wait  conflict
+      0        0     0            1     0  no
+      1       16     0            7     5  yes
+      2       32     0           13     5  yes
+      3       48     0           19     5  yes
+      4       64     0           25     5  yes
+      5       80     0           31     5  yes
+      6       96     0           37     5  yes
+      7      112     0           43     5  yes
+      8      128     0           49     5  yes
+      9      144     0           55     5  yes
+
+Q2b: total memory access cycles, including memory latency
+  stride  banks used  conflicts  wait cycles  total cycles  per element  vs stride 1
+       1           8          0            0            76         1.19         1.0x
+       2           4         15           30           106         1.66         1.4x
+       4           2         31          124           200         3.12         2.6x
+       8           1         63          315           391         6.11         5.1x
+      16           1         63          315           391         6.11         5.1x
+
+Rule check: conflicts happen when the banks used < busy time (6): matches simulation
