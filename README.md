@@ -52,6 +52,7 @@ Machine values come from the assignment. The rest follow the lecture.
 ├── requirements.txt         matplotlib, only used for the graph
 ├── vector_simulator.py      simulator, Questions 1 to 3
 ├── plot_results.py          Question 2 graph
+├── report.pdf               short report (in the submission zip)
 └── output/
     ├── program_output.txt   saved output of one run
     └── q2_stride_cycles.png Question 2 graph
