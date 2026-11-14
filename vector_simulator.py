@@ -7,6 +7,7 @@ Standard library only. Questions are added one at a time:
 """
 
 import random
+from math import gcd
 
 # Machine parameters (from the assignment and lecture)
 MVL = 64
@@ -286,6 +287,242 @@ def print_question_1c(rows):
               f"{r['vector']:>8}{r['ratio']:>14.1f}x")
 
 
+# ---------------------------------------------------------------------------
+# Question 2: memory bank simulation
+# ---------------------------------------------------------------------------
+# Rules (from the assignment):
+#   - Requests are issued in order, at most one per cycle.
+#   - Request i reads address i * stride, which is in bank (address % banks).
+#   - A bank is busy for BANK_BUSY cycles after it accepts a request.
+#   - If the bank is busy, the request waits (and so do the ones behind it).
+# Cycles are counted from 0. Total time = latency + last issue cycle + 1,
+# which gives latency + length when there are no conflicts (lecture: 12 + 64 = 76).
+
+VECTOR_LENGTH = 64
+
+
+def simulate_banks(stride, length=VECTOR_LENGTH, num_banks=NUM_BANKS, busy=BANK_BUSY):
+    """Issue the requests in order and return one record per request."""
+    free_at = [0] * num_banks      # first cycle each bank can accept a request
+    requests = []
+    previous_issue = -1
+    for i in range(length):
+        address = i * stride
+        bank = address % num_banks
+        earliest = previous_issue + 1
+        issue = max(earliest, free_at[bank])
+        free_at[bank] = issue + busy
+        requests.append({"index": i, "address": address, "bank": bank,
+                         "issue": issue, "stall": issue - earliest})
+        previous_issue = issue
+    return requests
+
+
+def total_cycles(requests, latency=MEMORY_LATENCY):
+    """Latency plus the cycle in which the last request is issued (counted from 1)."""
+    return latency + requests[-1]["issue"] + 1
+
+
+def banks_visited(stride, num_banks=NUM_BANKS):
+    """How many different banks the stride rotates through."""
+    return num_banks // gcd(stride, num_banks)
+
+
+def conflict_expected(stride, num_banks=NUM_BANKS, busy=BANK_BUSY):
+    """A bank is reused after `banks_visited` requests; a conflict needs that to be < busy."""
+    return banks_visited(stride, num_banks) < busy
+
+
+def question_2():
+    """Simulate every stride and collect the numbers for the table and graph."""
+    rows = []
+    for stride in STRIDES:
+        requests = simulate_banks(stride)
+        cycles = total_cycles(requests)
+        rows.append({
+            "stride": stride,
+            "requests": requests,
+            "conflicts": sum(1 for r in requests if r["stall"] > 0),
+            "stall_cycles": sum(r["stall"] for r in requests),
+            "cycles": cycles,
+            "per_element": cycles / len(requests),
+            "banks_visited": banks_visited(stride),
+            "conflict_expected": conflict_expected(stride),
+        })
+    base = rows[0]["cycles"]
+    for r in rows:
+        r["slowdown"] = r["cycles"] / base
+    return rows
+
+
+def print_question_2(rows, trace_length=10):
+    print("=" * 60)
+    print("Question 2: memory bank simulation")
+    print("=" * 60)
+    print(f"Banks = {NUM_BANKS}, bank busy = {BANK_BUSY} cycles, "
+          f"latency = {MEMORY_LATENCY} cycles, vector length = {VECTOR_LENGTH}")
+
+    print(f"\nQ2a: first {trace_length} requests for each stride (cycles start at 1)")
+    for r in rows:
+        print(f"\n  stride {r['stride']}")
+        print(f"    {'req':>3}{'address':>9}{'bank':>6}{'issue cycle':>13}{'wait':>6}  conflict")
+        for q in r["requests"][:trace_length]:
+            flag = "yes" if q["stall"] > 0 else "no"
+            print(f"    {q['index']:>3}{q['address']:>9}{q['bank']:>6}"
+                  f"{q['issue'] + 1:>13}{q['stall']:>6}  {flag}")
+
+    print("\nQ2b: total memory access cycles, including memory latency")
+    print(f"  {'stride':>6}{'banks used':>12}{'conflicts':>11}{'wait cycles':>13}"
+          f"{'total cycles':>14}{'per element':>13}{'vs stride 1':>13}")
+    for r in rows:
+        print(f"  {r['stride']:>6}{r['banks_visited']:>12}{r['conflicts']:>11}"
+              f"{r['stall_cycles']:>13}{r['cycles']:>14}{r['per_element']:>13.2f}"
+              f"{r['slowdown']:>12.1f}x")
+
+    matches = all((r["conflicts"] > 0) == r["conflict_expected"] for r in rows)
+    print("\nRule check: conflicts happen when the banks used < busy time "
+          f"({BANK_BUSY}): {'matches simulation' if matches else 'MISMATCH'}")
+
+
+# ---------------------------------------------------------------------------
+# Question 3: DAXPY, Y[i] = a * X[i] + Y[i]
+# ---------------------------------------------------------------------------
+# Simplified model (from the assignment):
+#   - Instructions run one after another, no chaining.
+#   - One lane: one element per cycle after the startup latency.
+#   - Time of one vector instruction = startup latency + VL (lecture: 64 + 6 = 70).
+#   - Memory bank conflicts are ignored.
+#   - Scalar loop overhead per strip is not given, so it is 0.
+#   - Scalar code: one instruction per cycle (CPI = 1).
+
+DAXPY_VECTOR_INSTRUCTIONS = [
+    ("vld X", "load"),
+    ("vmul.vs", "mul"),
+    ("vld Y", "load"),
+    ("vadd.vv", "add"),
+    ("vst Y", "store"),
+]
+
+CHAINED_CONVOYS = 3  # lecture's chime model: {vld, vmul}, {vld, vadd}, {vst}
+
+DAXPY_LENGTHS = [64, 128, 256]
+
+
+def daxpy_vector(a, x, y):
+    """Y = a * X + Y with vector instructions, one strip at a time."""
+    result = []
+    for start, length in strip_mine(len(x)):
+        vx = x[start:start + length]                    # vld X
+        product = vscalar_mul(a, vx)                    # vmul.vs
+        vy = y[start:start + length]                    # vld Y
+        result.extend(vadd(product, vy))                # vadd.vv, then vst Y
+    return result
+
+
+def daxpy_scalar(a, x, y):
+    """Y = a * X + Y one element at a time (the expected answer)."""
+    result = []
+    for i in range(len(x)):
+        result.append(a * x[i] + y[i])
+    return result
+
+
+def instruction_cycles(kind, vl):
+    """Cycles for one vector instruction: startup latency + one cycle per element."""
+    return STARTUP[kind] + vl
+
+
+def strip_timeline(vl, begin=0):
+    """Rows (instruction, startup, vl, start, end) for the DAXPY instructions of one strip."""
+    rows = []
+    time = begin
+    for name, kind in DAXPY_VECTOR_INSTRUCTIONS:
+        end = time + instruction_cycles(kind, vl)
+        rows.append({"name": name, "startup": STARTUP[kind], "vl": vl,
+                     "start": time, "end": end})
+        time = end
+    return rows
+
+
+def daxpy_vector_cycles(n, mvl=MVL, loop_overhead=0):
+    """Total cycles: the strips run one after another."""
+    total = 0
+    for _, length in strip_mine(n, mvl):
+        total += strip_timeline(length)[-1]["end"] + loop_overhead
+    return total
+
+
+def daxpy_scalar_cycles(n):
+    """Scalar loop at one instruction per cycle."""
+    return scalar_instruction_count("daxpy", n)
+
+
+def question_3a():
+    """Check the vector DAXPY on the lecture's small example and on longer inputs."""
+    lecture = daxpy_vector(2, [1, 2, 3], [10, 20, 30])
+    checks = [{"name": "Lecture example (a = 2)", "n": 3,
+               "result": lecture, "passed": lecture == [12, 24, 36]}]
+    for n in DAXPY_LENGTHS:
+        x = make_vector(n, 30 + n)
+        y = make_vector(n, 40 + n)
+        result = daxpy_vector(3, x, y)
+        checks.append({"name": "Random inputs (a = 3)", "n": n, "result": result,
+                       "passed": result == daxpy_scalar(3, x, y)})
+    return checks
+
+
+def question_3b(n=64):
+    """Cycle count for one strip of n elements, and the scalar comparison."""
+    vector = daxpy_vector_cycles(n)
+    scalar = daxpy_scalar_cycles(n)
+    return {"n": n, "timeline": strip_timeline(n), "vector": vector,
+            "scalar": scalar, "speedup": scalar / vector}
+
+
+def question_3c():
+    """Repeat for longer vectors, using strip mining."""
+    rows = []
+    for n in DAXPY_LENGTHS:
+        vector = daxpy_vector_cycles(n)
+        scalar = daxpy_scalar_cycles(n)
+        rows.append({"n": n, "strips": len(strip_mine(n)), "vector": vector,
+                     "per_element": vector / n, "scalar": scalar,
+                     "speedup": scalar / vector, "chained": CHAINED_CONVOYS * n})
+    return rows
+
+
+def print_question_3(checks, detail, rows):
+    print("=" * 60)
+    print("Question 3: DAXPY, Y[i] = a * X[i] + Y[i]")
+    print("=" * 60)
+
+    print("\nQ3a: correctness (vector result vs scalar loop)")
+    for c in checks:
+        print(f"  {c['name']:<26} n = {c['n']:>3}: {'correct' if c['passed'] else 'WRONG'}")
+    print(f"  Lecture example result: {checks[0]['result']}")
+
+    n = detail["n"]
+    print(f"\nQ3b: {n} elements, one strip, no chaining")
+    print(f"  {'instruction':<10}{'startup':>9}{'VL':>5}{'cycles':>8}{'start':>8}{'end':>7}")
+    for r in detail["timeline"]:
+        print(f"  {r['name']:<10}{r['startup']:>9}{r['vl']:>5}{r['end'] - r['start']:>8}"
+              f"{r['start']:>8}{r['end']:>7}")
+    startups = sum(r["startup"] for r in detail["timeline"])
+    count = len(detail["timeline"])
+    print(f"  Total = {startups} startup + {count} x {n} = {detail['vector']} cycles")
+    print(f"  Scalar = {len(SCALAR_SETUP['daxpy'])} setup + "
+          f"{len(SCALAR_LOOP['daxpy'])} x {n} = {detail['scalar']} cycles (1 instruction per cycle)")
+    print(f"  Speedup = {detail['scalar']} / {detail['vector']} = {detail['speedup']:.2f}x")
+
+    print("\nQ3c: longer vectors with strip mining (MVL = 64)")
+    print(f"  {'n':>4}{'strips':>8}{'vector':>8}{'per element':>13}{'scalar':>8}"
+          f"{'speedup':>9}{'chained (3n)':>14}")
+    for r in rows:
+        print(f"  {r['n']:>4}{r['strips']:>8}{r['vector']:>8}{r['per_element']:>13.2f}"
+              f"{r['scalar']:>8}{r['speedup']:>8.2f}x{r['chained']:>14}")
+    print("  chained (3n) = lecture's chime model: 3 convoys x n, startup ignored")
+
+
 def main():
     results, too_long = question_1a()
     print_question_1a(results, too_long)
@@ -293,6 +530,10 @@ def main():
     print_question_1b(question_1b())
     print()
     print_question_1c(question_1c())
+    print()
+    print_question_2(question_2())
+    print()
+    print_question_3(question_3a(), question_3b(), question_3c())
 
 
 if __name__ == "__main__":
